@@ -1,0 +1,185 @@
+# Conda 环境激活问题排查日志
+
+## 问题描述
+尝试激活 conda 虚拟环境时遇到错误，无法正常切换环境。
+
+## 环境信息
+- 操作系统：Windows
+- Shell：PowerShell
+- Conda 安装路径：D:\Users\liyueyi\anaconda3
+- 目标环境：myenv（代指实际环境名）
+
+## 排查过程
+
+### 1. 检查环境激活状态
+```powershell
+python --version
+# 输出：Python 3.12.7
+
+echo $VIRTUAL_ENV
+# 输出：空（未激活）
+```
+**结论**：虚拟环境未激活
+
+### 2. 尝试激活环境
+```powershell
+conda activate myenv
+# 错误：CondaError: Run 'conda init' before 'conda activate'
+```
+**原因**：conda 未在当前 shell 中初始化
+
+### 3. 运行 conda init
+```powershell
+conda init
+# 输出：修改了多个配置文件，包括 profile.ps1
+# 提示：需要关闭并重新打开 shell 才能生效
+```
+
+### 4. 重新尝试激活
+```powershell
+conda activate myenv
+# 错误：无法加载 profile.ps1，因为系统禁止运行脚本
+# 错误信息：SecurityError: UnauthorizedAccess
+```
+**原因**：PowerShell 执行策略为 Restricted
+
+### 5. 检查执行策略
+```powershell
+Get-ExecutionPolicy
+# 输出：Restricted
+```
+**结论**：执行策略过于严格，禁止加载脚本
+
+### 6. 尝试修改执行策略
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+# 错误：被更具体的策略覆盖，当前有效策略为 Bypass
+# 提示：运行 Get-ExecutionPolicy -List 查看详细配置
+```
+
+### 7. 查看详细执行策略
+```powershell
+Get-ExecutionPolicy -List
+# 输出：
+# MachinePolicy       Undefined
+# UserPolicy          Undefined
+# Process             Bypass
+# CurrentUser         RemoteSigned
+# LocalMachine        Undefined
+```
+**结论**：当前进程已经是 Bypass（最宽松），但 profile 未加载
+
+### 8. 尝试重新加载 profile
+```powershell
+. $PROFILE
+# 错误：找不到 Microsoft.PowerShell_profile.ps1
+# 实际文件名是 profile.ps1
+```
+**原因**：conda init 创建的文件名与 PowerShell 期望的不匹配
+
+### 9. 重命名 profile 文件
+```powershell
+Rename-Item "C:\Users\liyueyi\Documents\WindowsPowerShell\profile.ps1" "Microsoft.PowerShell_profile.ps1"
+```
+
+### 10. 重新加载 profile
+```powershell
+. $PROFILE
+# 输出：(base) PS D:\001-cs-profile\02-study-dl-heima>
+```
+**结果**：成功加载 profile，自动进入 base 环境
+
+### 11. 切换到目标环境
+```powershell
+conda activate myenv
+# 预期：成功切换到 myenv 环境
+```
+
+## 解决方案总结
+
+**根本原因**：
+1. conda init 创建的 profile 文件名不正确（profile.ps1 而非 Microsoft.PowerShell_profile.ps1）
+2. PowerShell 无法加载 profile，导致 conda 命令不可用
+
+**最终解决步骤**：
+1. 运行 `conda init` 初始化 conda
+2. 重命名 profile 文件：
+   ```powershell
+   Rename-Item "C:\Users\liyueyi\Documents\WindowsPowerShell\profile.ps1" "Microsoft.PowerShell_profile.ps1"
+   ```
+3. 重新加载 profile：
+   ```powershell
+   . $PROFILE
+   ```
+4. 激活目标环境：
+   ```powershell
+   conda activate myenv
+   ```
+
+## 注意事项
+- 修改执行策略后需要重启 PowerShell 才能完全生效
+- conda 默认会在 profile 加载后自动激活 base 环境
+- 如需禁用自动激活 base，可运行：`conda config --set auto_activate_base false`
+
+---
+
+## PyCharm IDE 环境配置
+
+### 问题描述
+在 PyCharm 中编写 PyTorch 代码时，`torch` 模块显示黄色警告，提示无法识别。
+
+### 排查过程
+
+### 1. 检查当前 Python 环境
+```powershell
+python --version
+# 输出：Python 3.12.7
+
+pip list | findstr torch
+# 输出：
+# torchaudio                        2.6.0+cu124
+# torchsummary                      1.5.1
+# torchvision                       0.21.0+cu124
+```
+**结论**：当前环境缺少核心 `torch` 包
+
+### 2. 检查 conda 环境
+```powershell
+conda info --envs
+# 输出：
+# # conda environments:
+# #
+# base                 * D:\Users\liyueyi\anaconda3
+# lingbot                D:\Users\liyueyi\anaconda3\envs\lingbot
+# potato                 D:\Users\liyueyi\anaconda3\envs\potato
+```
+**结论**：当前在 base 环境（有 * 标记），torch 可能安装在 lingbot 环境中
+
+### 3. 切换到 lingbot 环境检查
+```powershell
+conda activate lingbot
+pip list | findstr torch
+# 输出：
+# torch             2.8.0
+```
+**结论**：lingbot 环境中已安装 torch 2.8.0
+
+### 4. 在 PyCharm 中配置 lingbot 解释器
+**步骤**：
+1. 打开 PyCharm 设置：`File` → `Settings` → `Project` → `Python Interpreter`
+2. 点击左上角的 `+` 号（添加解释器）
+3. 选择 `Add Local Interpreter...`
+4. 左侧选择 `Conda Environment`
+5. 选择 `Existing environment`
+6. 点击右侧的 `...` 按钮，浏览到：
+   ```
+   D:\Users\liyueyi\anaconda3\envs\lingbot\python.exe
+   ```
+7. 点击 `OK`
+
+**结果**：PyCharm 成功识别 lingbot 环境，torch 模块警告消失
+
+### 注意事项
+- Python 解释器/conda 环境和项目文件可以在完全不同的位置，不要求在同一目录下
+- IDE 需要配置正确的 Python 解释器才能识别已安装的包
+- 不同 conda 环境之间的包是独立的，需要切换到对应环境才能使用
